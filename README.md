@@ -2,7 +2,7 @@
 
 ## Welcome!
 
-Welcome to the Medical Claims Datawarehouse project repository. This project explores membership and millions of medical claims data to uncover meaningful insights, identify trends and support data-driven decision-making.
+Welcome to the Medical Claims Datawarehouse project repository. This project explores membership and millions of real life medical claims data to uncover meaningful insights, identify trends and support data-driven decision-making.
 
 ## Project Overview
 
