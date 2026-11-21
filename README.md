@@ -33,6 +33,7 @@ The project involves extracting, cleaning, transforming, storing and analysing m
 ## Data Frequency
 
 Medical claims data is received and processed on a bi-monthly basis.
+Membership data is received as updated
 
 ## Project Status
 
