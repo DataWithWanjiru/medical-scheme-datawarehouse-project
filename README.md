@@ -1,48 +1,45 @@
-# medical-scheme-datawarehouse-project
+# Medical Scheme Data Warehouse
 
-## Welcome!
-
-Welcome to the Medical Claims Datawarehouse project repository. This project explores membership and millions of real life medical claims data to uncover meaningful insights, identify trends and support data-driven decision-making.
+Welcome to the Medical Claims Data Warehouse project repository.
 
 ## Project Overview
 
-The project involves extracting, cleaning, transforming, storing and analysing medical claims data to evaluate claims performance and healthcare expenditure.
+This project turns millions of real-life medical claims and membership records into clear, reliable insight. It covers the full journey from raw data to decision: extracting, cleaning, transforming, storing and analysing claims data to measure claims performance and healthcare expenditure, and to expose the trends and cost drivers that shape better decisions.
 
 ## Tools & Technologies
-- **Data Sources:** Import and compare/validate data from two sources.
-- **PostgreSQL:** Database management and data storage.
-- **Power BI:** Data visualisation and dashboard development.
-- **Git & GitHub:** Version control and project management.
-- **Notion:** Project Management
+
+- **Data Sources:** Two sources imported, compared and validated against each other for accuracy
+- **PostgreSQL:** Secure, structured data storage and management
+- **Power BI:** Interactive dashboards and data visualisation
+- **Git & GitHub:** Version control and collaboration
+- **Notion:** Project management and tracking
 
 ## Key Activities
 
-- Data cleaning and quality checks.
-- Data transformation and integration.
-- Medical claims trend analysis.
-- Claims expenditure and volume analysis.
-- Development of interactive Power BI dashboards.
+- Data cleaning and quality assurance
+- Data transformation and integration
+- Medical claims trend analysis
+- Claims expenditure and volume analysis
+- Design and development of interactive Power BI dashboards
 
 ## Project Objectives
 
-- Monitor medical claims expenditure.
-- Analyse claims trends over time.
-- Identify major cost drivers.
-- Generate insights to support decision-making.
+- Track and monitor medical claims expenditure
+- Uncover claims trends over time
+- Pinpoint the major cost drivers
+- Deliver insights that support confident, data-driven decisions
 
 ## Data Frequency
 
-Medical claims data is received and processed on a bi-monthly basis.
-Membership data is received as updated
+- **Medical claims:** received and processed bi-monthly
+- **Membership:** received as updated
 
 ## Project Status
 
-In Progress.
+**In progress.**
 
-## About me
+## About Me
 
-I am Mary Muiruri. A BI Intelligence engineer with a primary focus in ETL and analytics. 
+I am **Mary Muiruri**, a Business Intelligence Engineer specialising in ETL and analytics.
 
----
-
-**Note:** Sensitive medical and member information is excluded from this repository.
+> **Note:** Sensitive medical and member information is excluded from this repository.
