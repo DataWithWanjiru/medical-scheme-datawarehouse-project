@@ -1,0 +1,143 @@
+/*
+===============================================================================
+SafaricomDataWarehouse - BRONZE LAYER SETUP
+===============================================================================
+
+PURPOSE
+-------
+This script creates the Bronze-layer database objects required to ingest
+raw Safaricom membership snapshots received from source Excel files.
+
+The Bronze layer is intended to preserve source data exactly as received,
+without cleansing, standardization, validation, or type conversion.
+
+SOURCE FILE COLUMNS
+-------------------
+The script expects 17 source columns are expected from each membership snapshot.
+
+All source columns are intentionally stored as TEXT regardless of their
+business meaning. This prevents data loss during ingestion and allows
+data quality checks and transformations to occur in later layers.
+
+DATABASE OBJECTS CREATED
+----------------------
+1. bronze.ops_safaricom_members_list
+   Raw membership records plus ingestion metadata.
+
+2. bronze.file_ingestion_log
+   Audit table tracking loaded files and preventing duplicate ingestion.
+
+INGESTION METADATA
+------------------
+The following metadata will be automatically populated during ingestion:
+
+    bronze_id
+    snapshot_date
+    source_file_name
+    batch_id
+    source_row_number
+    load_date
+
+BRONZE LAYER PRINCIPLES
+-----------------------
+- Store source values exactly as received.
+- No business transformations.
+- No deduplication.
+- No cleansing.
+- No enrichment.
+- Preserve auditability and traceability.
+
+EXPECTED FUTURE DATA FLOW
+-------------------------
+Source Excel Files
+        |
+        V
+Bronze Layer (Raw Storage)
+        |
+        V
+Silver Layer (Validation & Standardization)
+        |
+        V
+Gold Layer (Reporting & Analytics)
+
+EXECUTION
+---------
+Run in pgAdmin Query Tool while connected to:
+
+    SafaricomDataWarehouse
+
+Safe to execute multiple times.
+
+Author: Mary Muiruri
+
+*/
+-- ============================================================================
+-- Create Bronze Schema
+-- ============================================================================
+-- Raw Membership Snapshot Table
+-- ============================================================================
+
+DROP TABLE IF EXISTS bronze.ops_safaricom_members_list;
+
+CREATE TABLE IF NOT EXISTS bronze.ops_safaricom_members_list -- Source Columns (As Is)
+(
+    staff_no            VARCHAR(150),
+    main_member         VARCHAR(150),
+    full_name           VARCHAR(150),
+    smart_membership    VARCHAR(150),
+    family_size         VARCHAR(150),
+    dob                 DATE,
+    end_of_cover        DATE,
+    age                 FLOAT,
+    sex                 VARCHAR(150),
+    join_date           DATE,
+    relationship        VARCHAR(150),
+    id_number           VARCHAR(150),
+    phone_no            VARCHAR(150),
+    email               VARCHAR(150),
+    category            VARCHAR(150),
+    organization_name   VARCHAR(150),
+    division            VARCHAR(150),
+
+    ---------------------------------------------------------------------------
+    -- Ingestion Metadata
+    ---------------------------------------------------------------------------
+
+    bronze_id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    received_date       DATE NOT NULL,
+    source_file_name    VARCHAR(255) NOT NULL,
+    batch_id            VARCHAR(100) NOT NULL,
+    load_date           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================================================
+-- File Ingestion Audit Log
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS bronze.file_ingestion_log
+(
+    ingestion_id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    source_file_name    VARCHAR(255) NOT NULL,
+    file_hash           VARCHAR(64) NOT NULL UNIQUE,
+    batch_id            VARCHAR(100) NOT NULL,
+    snapshot_date       DATE NOT NULL,
+    rows_loaded         INTEGER NOT NULL,
+    loaded_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================================================
+-- Validation Check
+-- Confirm required tables exist.
+-- ============================================================================
+
+SELECT
+    table_schema,
+    table_name
+FROM information_schema.tables
+WHERE table_schema = 'bronze'
+AND table_name IN
+(
+    'ops_safaricom_members_list',
+    'file_ingestion_log'
+)
+ORDER BY table_name;
