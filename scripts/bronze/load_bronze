@@ -1,1 +1,251 @@
 
+################################################################################
+# SAFARICOM MEMBERSHIP DATA
+# EXCEL -> POSTGRESQL BRONZE LAYER
+#
+# Purpose:
+# 1. Import an Excel membership file.
+# 2. Define the PostgreSQL column names and data types.
+# 3. Add a reporting period supplied by the user.
+# 4. Load the data into PostgreSQL.
+# 5. Replace existing records for the same period.
+# 6. Append records for all other periods.
+################################################################################
+
+# ==============================================================================
+# 1. IMPORT LIBRARIES
+# ==============================================================================
+
+import pandas as pd
+from sqlalchemy import create_engine, text
+from sqlalchemy.types import Text, Integer, Date
+from datetime import datetime
+
+
+# ==============================================================================
+# 2. USER SETTINGS - CHANGE THESE FOR EACH IMPORT
+# ==============================================================================
+
+# Excel file location
+data_import_path = 'Membership Data/Safaricom Membership List - August 03 2026.xlsx'
+
+# Reporting period - specify the date associated with this file
+period = "August 03 2026"
+
+# PostgreSQL connection details
+db_user = "postgres"
+db_password = "Dontmess600#"
+db_host = "localhost"
+db_port = "5432"
+db_name = "SafaricomDataWarehouse"
+
+# PostgreSQL destination
+schema_name = "bronze"
+table_name = "ops_safaricom_members_list"
+
+
+# ==============================================================================
+# 3. DEFINE YOUR COLUMN NAMES AND DATA TYPES
+# ==============================================================================
+
+# These must match the headers in your Excel file.
+# Change the SQL types here whenever you want a different schema.
+
+column_schema = {
+    "staff_no": "TEXT",
+    "main_member": "TEXT",
+    "full_name": "TEXT",
+    "smart_membership": "TEXT",
+    "family_size": "TEXT",
+    "dob": "DATE",
+    "end_of_cover": "DATE",
+    "age": "FLOAT",
+    "sex": "TEXT",
+    "join_date": "DATE",
+    "relationship": "TEXT",
+    "id_number": "TEXT",
+    "phone_no": "TEXT",
+    "email": "TEXT",
+    "category": "TEXT",
+    "organization_name": "TEXT",
+    "division": "TEXT"
+}
+
+# Map PostgreSQL data types to SQLAlchemy data types
+from sqlalchemy.types import Text, Integer, Date, Float
+
+sqlalchemy_types = {
+    "TEXT": Text(),
+    "INTEGER": Integer(),
+    "FLOAT": Float(),
+    "DATE": Date()
+}
+
+# ==============================================================================
+# 4. IMPORT EXCEL FILE
+# ==============================================================================
+
+print("\nImporting Excel membership file...")
+
+# Import the 17 membership columns, ignoring Excel headers
+membership_data = pd.read_excel(
+    data_import_path,
+    header=0,
+    usecols=range(17)
+)
+
+# Assign your own 17 column names
+membership_data.columns = list(column_schema.keys())
+
+print(f"Successfully imported {len(membership_data)} records.")
+print(f"Membership columns: {len(membership_data.columns)}")
+
+# ==============================================================================
+# 5. APPLY THE DEFINED DATA TYPES
+# ==============================================================================
+
+print("\nPreparing column data types...")
+
+for column, data_type in column_schema.items():
+
+    if data_type == "TEXT":
+        membership_data[column] = membership_data[column].astype("string")
+
+    elif data_type == "INTEGER":
+        membership_data[column] = pd.to_numeric(
+            membership_data[column],
+            errors="coerce"
+        ).astype("Int64")
+
+    elif data_type == "DATE":
+        membership_data[column] = pd.to_datetime(
+            membership_data[column],
+            errors="coerce"
+        ).dt.date
+
+# Add reporting period to every record
+reporting_period = datetime.strptime(period, "%B %d %Y").date()
+
+membership_data["period"] = reporting_period
+
+print("Data preparation completed.")
+
+
+# ==============================================================================
+# 6. CONNECT TO POSTGRESQL
+# ==============================================================================
+
+print("\nConnecting to PostgreSQL...")
+
+db_url = (
+    f"postgresql+psycopg2://{db_user}:{db_password}"
+    f"@{db_host}:{db_port}/{db_name}"
+)
+
+engine = create_engine(db_url)
+
+print("Successfully connected to PostgreSQL.")
+
+
+# ==============================================================================
+# 7. CREATE SCHEMA AND TABLE IF THEY DO NOT EXIST
+# ==============================================================================
+
+print("\nPreparing PostgreSQL destination...")
+
+# Generate SQL column definitions from the schema supplied above
+sql_columns = ",\n".join(
+    f'"{column}" {data_type}'
+    for column, data_type in column_schema.items()
+)
+
+create_schema_query = f'''
+    CREATE SCHEMA IF NOT EXISTS "{schema_name}";
+'''
+
+create_table_query = f'''
+    CREATE TABLE IF NOT EXISTS "{schema_name}"."{table_name}" (
+        {sql_columns},
+        "period" DATE
+    );
+'''
+
+with engine.begin() as connection:
+
+    connection.execute(text(create_schema_query))
+    connection.execute(text(create_table_query))
+
+print(f"Destination ready: {schema_name}.{table_name}")
+
+
+# ==============================================================================
+# 8. DELETE EXISTING RECORDS FOR THE REPORTING PERIOD
+# ==============================================================================
+
+print(f"\nChecking existing records for period: {period}")
+
+delete_query = text(f'''
+    DELETE FROM "{schema_name}"."{table_name}"
+    WHERE period = :reporting_period;
+''')
+
+with engine.begin() as connection:
+
+    result = connection.execute(
+        delete_query,
+        {"reporting_period": reporting_period}
+    )
+
+    deleted_records = result.rowcount
+
+print(f"Deleted {deleted_records} existing records for this period.")
+
+
+# ==============================================================================
+# 9. INSERT THE EXCEL DATA INTO POSTGRESQL
+# ==============================================================================
+
+print("\nLoading membership data into PostgreSQL...")
+
+# Define PostgreSQL data types for the upload
+postgres_dtypes = {
+    column: sqlalchemy_types[data_type]
+    for column, data_type in column_schema.items()
+}
+
+postgres_dtypes["period"] = Date()
+
+# Append the new records
+membership_data.to_sql(
+    name=table_name,
+    con=engine,
+    schema=schema_name,
+    if_exists="append",
+    index=False,
+    dtype=postgres_dtypes,
+    method="multi",
+    chunksize=1000
+)
+
+print(f"Successfully loaded {len(membership_data)} records.")
+
+
+# ==============================================================================
+# 10. DISPLAY IMPORT SUMMARY
+# ==============================================================================
+
+print("\n" + "=" * 65)
+print("MEMBERSHIP DATA IMPORT COMPLETED")
+print("=" * 65)
+
+print(f"Database       : {db_name}")
+print(f"Schema         : {schema_name}")
+print(f"Table          : {table_name}")
+print(f"Reporting Date : {period}")
+print(f"Records Loaded : {len(membership_data)}")
+print(f"Records Replaced: {deleted_records}")
+
+print("=" * 65)
+
+engine.dispose()
+
