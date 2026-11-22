@@ -49,10 +49,10 @@ print("\nSetting user variables...")
 # ------------------------------------------------------------------------------
 
 db_user = "postgres"
-db_password = "Dontmess600#"
-db_host = "localhost"
-db_port = "5432"
-db_name = "SafaricomDataWarehouse"
+db_password = "YOURPASSWORD"
+db_host = "SAHEL DESERT"
+db_port = "58298"
+db_name = "RUTOMUSTGO"
 
 
 # ------------------------------------------------------------------------------
