@@ -34,10 +34,10 @@ period = "August 03 2026"
 
 # PostgreSQL connection details
 db_user = "postgres"
-db_password = "Dontmess600#"
-db_host = "localhost"
-db_port = "5432"
-db_name = "SafaricomDataWarehouse"
+db_password = "YOURPASSWORD"
+db_host = "host"
+db_port = "67389"
+db_name = "RUTOMUSTGO"
 
 # PostgreSQL destination
 schema_name = "bronze"
