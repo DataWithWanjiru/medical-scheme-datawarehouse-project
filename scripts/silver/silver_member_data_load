@@ -1,0 +1,989 @@
+
+################################################################################
+# SAFARICOM MEMBERSHIP DATA
+# POSTGRESQL BRONZE -> CLEANING & MAPPING -> POSTGRESQL SILVER
+#
+# PURPOSE:
+# 1. Retrieve membership data from the PostgreSQL Bronze Layer.
+# 2. Import existing Excel mapping tables.
+# 3. Clean and standardize membership data.
+# 4. Apply the five mapping tables.
+# 5. Calculate age using the supplied DWH creation date.
+# 6. Generate age groups.
+# 7. Calculate the number of people in each family.
+# 8. Generate derived family-size classifications.
+# 9. Load the transformed data into the PostgreSQL Silver Layer.
+# 10. Replace existing Silver records for periods being processed.
+#
+# SOURCE:
+# bronze.ops_safaricom_members_list
+#
+# DESTINATION:
+# silver.ops_safaricom_members_list
+################################################################################
+
+
+# ==============================================================================
+# 1. IMPORT LIBRARIES
+# ==============================================================================
+
+import pandas as pd
+import numpy as np
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
+from sqlalchemy.types import Text, Integer, Date
+
+from datetime import datetime
+
+
+# ==============================================================================
+# 2. USER SETTINGS - CHANGE THESE AS REQUIRED
+# ==============================================================================
+
+print("\nSetting user variables...")
+
+
+# ------------------------------------------------------------------------------
+# A. POSTGRESQL CONNECTION DETAILS
+# ------------------------------------------------------------------------------
+
+db_user = "postgres"
+db_password = "Dontmess600#"
+db_host = "localhost"
+db_port = "5432"
+db_name = "SafaricomDataWarehouse"
+
+
+# ------------------------------------------------------------------------------
+# B. BRONZE LAYER SOURCE
+# ------------------------------------------------------------------------------
+
+source_schema = "bronze"
+source_table = "ops_safaricom_members_list"
+
+
+# ------------------------------------------------------------------------------
+# C. EXCEL MAPPING WORKBOOK
+# ------------------------------------------------------------------------------
+
+mapping_path = ("Membership Data/Membership Data Mapping (Sep 03 2026).xlsx"
+)
+
+
+# ------------------------------------------------------------------------------
+# D. DWH CREATION DATE
+# ------------------------------------------------------------------------------
+
+# Supply the actual date when running the script.
+# Format: YYYY-MM-DD
+
+dwh_create_date = "2026-11-22"
+
+
+# ------------------------------------------------------------------------------
+# E. SILVER LAYER DESTINATION
+# ------------------------------------------------------------------------------
+
+target_schema = "silver"
+target_table = "ops_safaricom_members_list"
+
+
+# ------------------------------------------------------------------------------
+# F. FAMILY IDENTIFICATION COLUMNS
+# ------------------------------------------------------------------------------
+
+# staff_no identifies the employee/principal family.
+# smart_membership identifies the individual member.
+#
+# Change these settings if your membership identifiers differ.
+
+family_identifier_column = "staff_no"
+individual_identifier_column = "smart_membership"
+
+
+print("User variables successfully defined.")
+print("....................................................")
+
+
+# ==============================================================================
+# 3. DEFINE THE BRONZE TABLE COLUMNS
+# ==============================================================================
+
+print("\nDefining source columns...")
+
+
+source_columns = [
+    "staff_no",
+    "main_member",
+    "full_name",
+    "smart_membership",
+    "family_size",
+    "dob",
+    "end_of_cover",
+    "age",
+    "sex",
+    "join_date",
+    "relationship",
+    "id_number",
+    "phone_no",
+    "email",
+    "category",
+    "organization_name",
+    "division",
+    "period"
+]
+
+
+# ==============================================================================
+# 4. DEFINE THE SILVER TABLE STRUCTURE
+# ==============================================================================
+
+# Original 18 columns are retained.
+# Age changes from FLOAT/DOUBLE PRECISION to INTEGER.
+# Two additional columns are generated:
+#   - age_group
+#   - no_of_people_in_family
+
+silver_column_types = {
+
+    "staff_no": "TEXT",
+    "main_member": "TEXT",
+    "full_name": "TEXT",
+    "smart_membership": "TEXT",
+    "family_size": "TEXT",
+
+    "dob": "DATE",
+    "end_of_cover": "DATE",
+
+    "age": "INTEGER",
+
+    "sex": "TEXT",
+
+    "join_date": "DATE",
+
+    "relationship": "TEXT",
+
+    "id_number": "TEXT",
+    "phone_no": "TEXT",
+    "email": "TEXT",
+
+    "category": "TEXT",
+    "organization_name": "TEXT",
+    "division": "TEXT",
+
+    "period": "DATE",
+
+    "age_group": "TEXT",
+    "no_of_people_in_family": "INTEGER"
+}
+
+
+silver_columns = list(silver_column_types.keys())
+
+
+# ==============================================================================
+# SECTION 1: DATA CLEANING, STANDARDIZATION AND MAPPING
+# ==============================================================================
+
+
+# ==============================================================================
+# 5. CONNECT TO POSTGRESQL
+# ==============================================================================
+
+print("\nConnecting to PostgreSQL...")
+
+
+db_url = URL.create(
+    drivername="postgresql+psycopg2",
+    username=db_user,
+    password=db_password,
+    host=db_host,
+    port=int(db_port),
+    database=db_name
+)
+
+
+engine = create_engine(db_url)
+
+
+print("Successfully connected to PostgreSQL.")
+
+
+# ==============================================================================
+# 6. IMPORT DATA FROM THE BRONZE LAYER
+# ==============================================================================
+
+print("\nImporting membership data from Bronze Layer...")
+
+
+bronze_query = text(f'''
+    SELECT *
+    FROM "{source_schema}"."{source_table}"
+''')
+
+
+with engine.connect() as connection:
+
+    membership_data = pd.read_sql(
+        bronze_query,
+        connection
+    )
+
+
+# Confirm that the expected Bronze columns exist.
+
+missing_columns = [
+    column
+    for column in source_columns
+    if column not in membership_data.columns
+]
+
+
+if missing_columns:
+
+    raise ValueError(
+        f"The Bronze table is missing these expected columns: "
+        f"{missing_columns}"
+    )
+
+
+# Retain only the expected 18 Bronze columns and their original order.
+
+membership_data = membership_data[source_columns].copy()
+
+
+print(f"Successfully imported {len(membership_data)} records.")
+
+print(f"Number of source columns: {len(membership_data.columns)}")
+
+
+# ==============================================================================
+# 7. IMPORT THE EXCEL MAPPING TABLES
+# ==============================================================================
+
+print("\nImporting Excel mapping tables...")
+
+
+GenderMap = pd.read_excel(
+    mapping_path,
+    sheet_name="GenderMap"
+)
+
+
+RelationMap = pd.read_excel(
+    mapping_path,
+    sheet_name="RelationMap"
+)
+
+
+BenefitCategoryMap = pd.read_excel(
+    mapping_path,
+    sheet_name="BenefitCategoryMap"
+)
+
+
+OrgNameMap = pd.read_excel(
+    mapping_path,
+    sheet_name="OrgNameMap"
+)
+
+
+DivisionMap = pd.read_excel(
+    mapping_path,
+    sheet_name="DivisionMap"
+)
+
+
+print("Successfully imported all five mapping sheets.")
+
+
+# ==============================================================================
+# 8. CLEAN AND STANDARDIZE TEXT COLUMNS
+# ==============================================================================
+
+print("\nCleaning and standardizing text columns...")
+
+
+text_columns = [
+    "staff_no",
+    "main_member",
+    "full_name",
+    "smart_membership",
+    "family_size",
+    "sex",
+    "relationship",
+    "id_number",
+    "phone_no",
+    "email",
+    "category",
+    "organization_name",
+    "division"
+]
+
+
+# Remove unnecessary spaces and standardize blank values.
+
+for column in text_columns:
+
+    membership_data[column] = (
+        membership_data[column]
+        .astype("string")
+        .str.strip()
+    )
+
+    membership_data[column] = (
+        membership_data[column]
+        .replace("", pd.NA)
+    )
+
+
+# ==============================================================================
+# 9. DEFINE THE MAPPING FUNCTION
+# ==============================================================================
+
+def apply_mapping(data, mapping_table, source_column, sheet_name):
+
+    """
+    Apply an existing Excel mapping table to a source column.
+
+    The first Excel column contains the original values.
+    The second Excel column contains the mapped values.
+
+    If a source value is not found in the mapping table,
+    its original value is retained.
+
+    Matching ignores leading/trailing spaces and differences
+    in letter case.
+    """
+
+    if mapping_table.shape[1] < 2:
+
+        raise ValueError(
+            f"{sheet_name} must contain at least two columns."
+        )
+
+
+    # Read the first two columns without depending on their headers.
+
+    mapping = mapping_table.iloc[:, :2].copy()
+
+    mapping.columns = ["original_value", "mapped_value"]
+
+
+    # Standardize mapping values.
+
+    mapping["original_value"] = (
+        mapping["original_value"]
+        .astype("string")
+        .str.strip()
+    )
+
+    mapping["mapped_value"] = (
+        mapping["mapped_value"]
+        .astype("string")
+        .str.strip()
+    )
+
+
+    # Remove missing mapping keys and duplicate keys.
+
+    mapping = mapping.dropna(subset=["original_value"])
+
+    mapping = mapping[
+        mapping["original_value"] != ""
+    ]
+
+    mapping = mapping.drop_duplicates(
+        subset=["original_value"],
+        keep="first"
+    )
+
+
+    # Create case-insensitive lookup keys.
+
+    mapping["_lookup_key"] = (
+        mapping["original_value"].str.casefold()
+    )
+
+
+    mapping = mapping.drop_duplicates(
+        subset=["_lookup_key"],
+        keep="first"
+    )
+
+
+    mapping_dictionary = (
+        mapping
+        .set_index("_lookup_key")["mapped_value"]
+        .to_dict()
+    )
+
+
+    # Prepare source values.
+
+    original_values = (
+        data[source_column]
+        .astype("string")
+        .str.strip()
+    )
+
+
+    lookup_keys = original_values.str.casefold()
+
+
+    # Apply mapping.
+
+    mapped_values = lookup_keys.map(mapping_dictionary)
+
+
+    # Retain original values where mapping is unavailable.
+
+    data[source_column] = mapped_values.fillna(original_values)
+
+
+    # Retain the original value if the mapped result is blank.
+
+    data[source_column] = data[source_column].replace(
+        "",
+        pd.NA
+    )
+
+
+    print(f"Successfully applied {sheet_name} to {source_column}.")
+
+
+    return data
+
+
+# ==============================================================================
+# 10. APPLY THE FIVE MAPPING TABLES
+# ==============================================================================
+
+print("\nApplying membership mappings...")
+
+
+mapping_list = [
+
+    [GenderMap, "sex", "GenderMap"],
+
+    [RelationMap, "relationship", "RelationMap"],
+
+    [BenefitCategoryMap, "category", "BenefitCategoryMap"],
+
+    [OrgNameMap, "organization_name", "OrgNameMap"],
+
+    [DivisionMap, "division", "DivisionMap"]
+
+]
+
+
+for mapping_table, source_column, sheet_name in mapping_list:
+
+    membership_data = apply_mapping(
+        membership_data,
+        mapping_table,
+        source_column,
+        sheet_name
+    )
+
+
+print("\nAll five mapping tables successfully applied.")
+
+
+# ==============================================================================
+# SECTION 2: DATA PREPARATION AND DERIVED COLUMNS
+# ==============================================================================
+
+
+# ==============================================================================
+# 11. PREPARE THE DWH CREATION DATE
+# ==============================================================================
+
+print("\nPreparing DWH creation date...")
+
+
+dwh_create_date = pd.to_datetime(
+    dwh_create_date,
+    format="%Y-%m-%d",
+    errors="raise"
+)
+
+
+dwh_create_date = dwh_create_date.date()
+
+
+print(f"DWH creation date: {dwh_create_date}")
+
+
+# ==============================================================================
+# 12. CALCULATE AGE
+# ==============================================================================
+
+print("\nCalculating member ages...")
+
+
+membership_data["dob"] = pd.to_datetime(
+    membership_data["dob"],
+    errors="coerce"
+)
+
+
+membership_data["age"] = (
+
+    dwh_create_date.year
+    - membership_data["dob"].dt.year
+
+    - (
+
+        (
+            dwh_create_date.month
+            < membership_data["dob"].dt.month
+        )
+
+        |
+
+        (
+
+            (
+                dwh_create_date.month
+                == membership_data["dob"].dt.month
+            )
+
+            &
+
+            (
+                dwh_create_date.day
+                < membership_data["dob"].dt.day
+            )
+
+        )
+
+    ).astype("int64")
+
+)
+
+
+# Convert age into nullable integer.
+
+membership_data["age"] = (
+    membership_data["age"]
+    .astype("Int64")
+)
+
+
+print("Age calculation completed.")
+
+
+# ==============================================================================
+# 13. GENERATE AGE GROUPS
+# ==============================================================================
+
+print("\nGenerating age groups...")
+
+
+bins = [
+    0,
+    10,
+    20,
+    30,
+    40,
+    50,
+    60,
+    70,
+    200
+]
+
+
+labels = [
+    "0-9",
+    "10-19",
+    "20-29",
+    "30-39",
+    "40-49",
+    "50-59",
+    "60-69",
+    "70+"
+]
+
+
+membership_data["age_group"] = pd.cut(
+
+    membership_data["age"],
+
+    bins=bins,
+
+    labels=labels,
+
+    right=False
+
+)
+
+
+# Include Unspecified for missing or out-of-range ages.
+
+membership_data["age_group"] = (
+    membership_data["age_group"]
+    .cat.add_categories(["Unspecified"])
+    .fillna("Unspecified")
+)
+
+
+membership_data["age_group"] = (
+    membership_data["age_group"]
+    .astype("string")
+)
+
+
+print("Age groups successfully generated.")
+
+
+# ==============================================================================
+# 14. CALCULATE NUMBER OF PEOPLE IN EACH FAMILY
+# ==============================================================================
+
+print("\nCalculating family sizes...")
+
+
+# Count distinct individual membership identifiers
+# for each staff number.
+
+family_size_data = (
+
+    membership_data
+    .groupby(
+        family_identifier_column,
+        dropna=False
+    )[individual_identifier_column]
+
+    .nunique()
+
+    .reset_index()
+
+)
+
+
+family_size_data = family_size_data.rename(
+
+    columns={
+
+        individual_identifier_column:
+        "no_of_people_in_family"
+
+    }
+
+)
+
+
+# Merge family counts into the membership data.
+
+membership_data = membership_data.merge(
+
+    family_size_data,
+
+    on=family_identifier_column,
+
+    how="left"
+
+)
+
+
+# Convert family counts into nullable integers.
+
+membership_data["no_of_people_in_family"] = (
+
+    membership_data["no_of_people_in_family"]
+    .astype("Int64")
+
+)
+
+
+print("Family member counts successfully calculated.")
+
+
+# ==============================================================================
+# 15. GENERATE FAMILY SIZE CLASSIFICATIONS
+# ==============================================================================
+
+print("\nGenerating family size classifications...")
+
+
+def generate_family_size(number_of_people):
+
+    if pd.isna(number_of_people):
+
+        return pd.NA
+
+    if number_of_people == 0:
+
+        return pd.NA
+
+    if number_of_people == 1:
+
+        return "M"
+
+    return "M+" + str(int(number_of_people) - 1)
+
+
+membership_data["family_size"] = (
+
+    membership_data["no_of_people_in_family"]
+    .apply(generate_family_size)
+    .astype("string")
+
+)
+
+
+print("Family size classifications completed.")
+
+
+# ==============================================================================
+# 16. PREPARE DATE COLUMNS
+# ==============================================================================
+
+print("\nPreparing date columns...")
+
+
+date_columns = [
+
+    "dob",
+    "end_of_cover",
+    "join_date",
+    "period"
+
+]
+
+
+for column in date_columns:
+
+    membership_data[column] = pd.to_datetime(
+
+        membership_data[column],
+
+        errors="coerce"
+
+    ).dt.date
+
+
+print("Date columns prepared.")
+
+
+# ==============================================================================
+# 17. ARRANGE THE FINAL SILVER COLUMNS
+# ==============================================================================
+
+print("\nPreparing final Silver Layer columns...")
+
+
+membership_data = membership_data[silver_columns].copy()
+
+
+# Confirm final column count.
+
+print(f"Final Silver columns: {len(membership_data.columns)}")
+
+print(f"Final Silver records: {len(membership_data)}")
+
+
+# ==============================================================================
+# 18. DEFINE POSTGRESQL DATA TYPES
+# ==============================================================================
+
+postgres_dtypes = {
+
+    column: (
+
+        Text() if data_type == "TEXT"
+
+        else Integer() if data_type == "INTEGER"
+
+        else Date()
+
+    )
+
+    for column, data_type in silver_column_types.items()
+
+}
+
+
+# ==============================================================================
+# 19. CREATE SILVER SCHEMA AND TABLE IF THEY DO NOT EXIST
+# ==============================================================================
+
+print("\nPreparing Silver Layer destination...")
+
+
+sql_columns = ",\n".join(
+
+    f'"{column}" {data_type}'
+
+    for column, data_type in silver_column_types.items()
+
+)
+
+
+create_schema_query = f'''
+
+    CREATE SCHEMA IF NOT EXISTS "{target_schema}";
+
+'''
+
+
+create_table_query = f'''
+
+    CREATE TABLE IF NOT EXISTS "{target_schema}"."{target_table}" (
+
+        {sql_columns}
+
+    );
+
+'''
+
+
+with engine.begin() as connection:
+
+    connection.execute(
+        text(create_schema_query)
+    )
+
+    connection.execute(
+        text(create_table_query)
+    )
+
+
+print(
+    f"Silver destination ready: "
+    f"{target_schema}.{target_table}"
+)
+
+
+# ==============================================================================
+# 20. REPLACE EXISTING RECORDS FOR THE PERIODS BEING PROCESSED
+# ==============================================================================
+
+print("\nPreparing to load Silver Layer...")
+
+
+# Identify all distinct periods in the Bronze data.
+
+periods_to_replace = (
+
+    membership_data["period"]
+    .dropna()
+    .unique()
+    .tolist()
+
+)
+
+
+print(f"Number of periods being processed: {len(periods_to_replace)}")
+
+
+# Delete and insert within one database transaction.
+# If the insert fails, the deletes are rolled back.
+
+with engine.begin() as connection:
+
+
+    # Delete existing records for each period.
+
+    total_deleted = 0
+
+
+    for current_period in periods_to_replace:
+
+        delete_query = text(f'''
+
+            DELETE FROM "{target_schema}"."{target_table}"
+
+            WHERE "period" = :current_period;
+
+        ''')
+
+
+        result = connection.execute(
+
+            delete_query,
+
+            {"current_period": current_period}
+
+        )
+
+
+        total_deleted += result.rowcount
+
+
+    print(
+        f"Deleted {total_deleted} existing Silver records."
+    )
+
+
+    # Insert the transformed membership data.
+
+    membership_data.to_sql(
+
+        name=target_table,
+
+        con=connection,
+
+        schema=target_schema,
+
+        if_exists="append",
+
+        index=False,
+
+        dtype=postgres_dtypes,
+
+        method="multi",
+
+        chunksize=1000
+
+    )
+
+
+    print(
+        f"Successfully inserted {len(membership_data)} records."
+    )
+
+
+# ==============================================================================
+# 21. DISPLAY IMPORT SUMMARY
+# ==============================================================================
+
+print("\n" + "=" * 70)
+
+print("SAFARICOM MEMBERSHIP SILVER LAYER COMPLETED")
+
+print("=" * 70)
+
+
+print(f"Database             : {db_name}")
+
+print(f"Source Table         : {source_schema}.{source_table}")
+
+print(f"Destination Table    : {target_schema}.{target_table}")
+
+print(f"DWH Creation Date    : {dwh_create_date}")
+
+print(f"Records Imported     : {len(membership_data)}")
+
+print(f"Records Replaced     : {total_deleted}")
+
+print(f"Periods Processed    : {len(periods_to_replace)}")
+
+print(f"Columns Loaded       : {len(membership_data.columns)}")
+
+
+print("=" * 70)
+
+
+# ==============================================================================
+# 22. CLOSE POSTGRESQL CONNECTION
+# ==============================================================================
+
+engine.dispose()
+
+
+print("\nPostgreSQL connection closed.")
+
+print("SILVER LAYER PROGRAM COMPLETED SUCCESSFULLY.")
